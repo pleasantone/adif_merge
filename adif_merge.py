@@ -37,7 +37,7 @@ from datetime import datetime, timedelta
 
 import adif_io
 
-VERSION = "0.0.1"
+__version__ = "0.0.1"
 
 # merge any calls in the same band and same mode within 90 seconds
 MERGE_WINDOW = 90
@@ -328,7 +328,7 @@ def adif_write(stream, qsos, minimal=False):
     adif_write_field(stream, "created_timestamp",
                      "{:%Y%m%d %H%M%S}".format(datetime.utcnow()))
     adif_write_field(stream, "programid", "logmerge_pst")
-    adif_write_field(stream, "programversion", VERSION)
+    adif_write_field(stream, "programversion", __version__)
     print("<eoh>", file=stream)
     for qso in qsos:
         for field in FIELD_ORDER:
@@ -394,6 +394,8 @@ def main():
                         help="Only output important fields")
     parser.add_argument('--csv', '-c', type=str,
                         help="WSJT-X compatible .log file")
+    parser.add_argument('--version', '-v', action='version',
+                        version="%(prog)s {version}".format(version=__version__))
     parser.add_argument('input', type=str, nargs="+",
                         help="Input file list")
     args = parser.parse_args()
