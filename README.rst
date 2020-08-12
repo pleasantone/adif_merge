@@ -11,7 +11,7 @@ partial information from different reported sources (e.g. previous
 uploads to LoTW, QRZ, clublog, et al. Each of these sources tend to
 "augment" log entries with their own additional information.
 
-The motivation for this is that GridTracker (https://tagloomis.com/) and
+The motivation for this is that GridTracker <https://tagloomis.com/> and
 other logging programs are able to not only send log entries to remote
 services, but also automatically download ADIF files back from them.
 I found myself with a bunch of ADIF files, but none of them really gave
@@ -33,7 +33,7 @@ a conflict between QRZ and LOTW on ITU and CQ zones, since they are
 calculated by ARRL and manually entered by QRZ.
 
 For a complete look at the decision making process, read the code.  It's
-commented, including caveats and is designed to be easily modifyable.
+commented, including caveats and is designed to be easily modifiable.
 
 Use the '-p <filename>.json' option to generate problem QSO output in
 JSON format to see where there were conflicts and how we resolved them.
@@ -44,19 +44,14 @@ Installation
 Developed under python 3 > 3.5
 
 Installation requires the `adif_io` python module:
-
-```
     pip3 install adif_io
-```
 
 Sample usage
 ------------
 
-```
     ./adif_merge.py -o output.adif -c output.csv -p problem.json \
             wsjtx_log.adi qsos_LOTW.adif qsls_LOTW.adif qrz.adif \
             clublog.adif
-```
 
 Please use the `--problem` option to look at unresolved merge issues.
 
