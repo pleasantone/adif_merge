@@ -35,7 +35,7 @@ calculated by ARRL and manually entered by QRZ.
 For a complete look at the decision making process, read the code.  It's
 commented, including caveats and is designed to be easily modifiable.
 
-Use the '-p <filename>.json' option to generate problem QSO output in
+Use the `-p <filename>.json` option to generate problem QSO output in
 JSON format to see where there were conflicts and how we resolved them.
 
 Installation
@@ -43,15 +43,17 @@ Installation
 
 Developed under python 3 > 3.5
 
-Installation requires the `adif_io` python module:
+Installation requires the `adif_io` python module::
+
     pip3 install adif_io
 
 Sample usage
 ------------
 
-    ./adif_merge.py -o output.adif -c output.csv -p problem.json \
-            wsjtx_log.adi qsos_LOTW.adif qsls_LOTW.adif qrz.adif \
-            clublog.adif
+Here's what I do to merge my WSJT and GridTracker managed logs::
+
+    adif_merge.py -o mergedlog.adif -c merged_wsjtx.log -p problems.json \
+            ~/.local/share/WSJT-X/wsjtx_log.adi ~/Documents/GridTracker/*.adif
 
 Please use the `--problem` option to look at unresolved merge issues.
 
