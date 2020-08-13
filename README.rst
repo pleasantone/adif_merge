@@ -55,11 +55,13 @@ Here's what I do to merge my WSJT and GridTracker managed logs::
     adif_merge.py -o mergedlog.adif -c merged_wsjtx.log -p problems.json \
             ~/.local/share/WSJT-X/wsjtx_log.adi ~/Documents/GridTracker/*.adif
 
-Please use the `--problem` option to look at unresolved merge issues.
+Please use the `--problem` option to look at merge issues that the
+program wasn't confident about resolving.  For example QRZ and LoTW
+often differ about user-entered information like ITU and CQ zones.
 
-For example QRZ and LoTW often differ about items like ITU and CQ
-zones. The problems option will generate two .json files, a summary and
-a list of all unresolved issues.
+The problems option will a .json file that is approximately human readable
+list of unresolved issues you may wish to fix--first organized by field,
+and again organized by QSO.
 
 
 Feedback & Disclaimer

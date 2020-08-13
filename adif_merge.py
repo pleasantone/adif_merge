@@ -62,53 +62,6 @@ FIELD_ORDER = [
 
 ZONE_FIELDS = ['MY_CQ_ZONE', 'CQZ', 'MY_ITU_ZONE', 'ITUZ']
 
-# this is not complete
-DIGI_RANGES = [
-    [14.074, "FT8"],
-    [14.080, "FT4"],
-    [03.573, "FT8"],
-    [03.575, "FT4"],
-    [03.585, "FT8"],
-    [05.357, "FT8"],
-    [07.0475, "FT4"],
-    [07.074, "FT8"],
-    [10.136, "FT8"],
-    [10.140, "FT4"],
-    [18.100, "FT8"],
-    [18.104, "FT4"],
-    [21.074, "FT8"],
-    [21.091, "FT4"],
-    [21.140, "FT4"],
-    [24.915, "FT8"],
-    [24.919, "FT4"],
-    [28.074, "FT8"],
-    [28.180, "FT4"]
-]
-
-
-def truncate(number, digits):
-    """
-    Truncate a number to X significant digits past decimal.
-    """
-    stepper = 10.0 ** digits
-    return math.trunc(stepper * number) / stepper
-
-
-def fixup_frequency(freq, mode, submode=None):
-    """
-    Different logging sources truncate frequencies, so harmonize
-    slight variations for digital modes down to the official
-    frequency for that mode.
-    """
-    if mode == "MFSK":
-        mode = submode
-    freq = truncate(freq, 3)
-    for digirange in DIGI_RANGES:
-        if mode == digirange[1]:
-            if digirange[0]-.0015 <= freq <= digirange[0]+.003:
-                return digirange[0]
-    return freq
-
 
 def fixup_qso(qso):
     """
@@ -156,8 +109,7 @@ def fixup_qso(qso):
     # the following fields are floats, but should be truncated
     for field in ['FREQ', 'FREQ_RX']:
         if field in qso:
-            qso[field] = fixup_frequency(float(qso[field]),
-                                         qso.get('MODE'), qso.get('SUBMODE'))
+            qso[field] = round(float(qso[field]), 3)
 
     # remove bad LAT/LON entries
     for field in ['LAT', 'LON']:
@@ -194,23 +146,26 @@ def merge_dupe_fields(field, first, dupe):
     if first[field] == dupe[field]:
         del dupe[field]
         return
-    # special-case COUNTRY before other text fields in general
-    if field in ['COUNTRY']:
-        if first[field].lower() in dupe[field].lower():
+    # special-case COUNTRY and COUNTY before other text fields in general
+    if field in ['CNTY', 'COUNTRY']:
+        fnslc = first[field].replace(" ", "").lower()
+        dnslc = dupe[field].replace(" ", "").lower()
+        if fnslc == dnslc:
+            # if dupe had spaces, use the one with spaces
+            if len(first[field]) < len(dupe[field]):
+                first[field] = dupe[field]
+            del dupe[field]
+        elif fnslc in dnslc:
             first[field] = dupe[field]
             del dupe[field]
-        elif dupe[field].lower() in first[field].lower():
+        elif dnslc in fnslc:
             del dupe[field]
-        lotw_override(field, first, dupe)
         return
-    # prefer mixed case to all upper case when present
-    try:
+    if field in ['NAME']:
         if first[field].lower() == dupe[field].lower():
             if first[field].isupper():
                 first[field] = dupe[field]
             del dupe[field]
-    except AttributeError:
-        pass
     if field in ['TIME_ON', 'TIME_OFF', 'GRIDSQUARE']:
         # handle the present but empty case
         if not first[field]:
@@ -229,17 +184,7 @@ def merge_dupe_fields(field, first, dupe):
         if dupe[field] == 'Y':
             first[field] = 'Y'
         del dupe[field]
-    if field in ['CQZ', 'ITUZ', 'FREQ']:
-        lotw_override(field, first, dupe)
-    if field in ['CNTY']:
-        # remove all whitespace and covert to lowercase
-        fns = first[field].replace(" ", "").lower()
-        dns = dupe[field].replace(" ", "").lower()
-        if fns == dns:
-            # if dupe had spaces, use the one with spaces
-            if len(first[field]) < len(dupe[field]):
-                first[field] = dupe[field]
-            del dupe[field]
+    if field.startswith("APP_LOTW_") or field in ['QSLRDATE']:
         lotw_override(field, first, dupe)
 
 
@@ -297,28 +242,34 @@ def merge_qsos(qsos, window):
 
 def dump_problems(qsos, path):
     """
-    Report any unmerged fields in both path.json and sum_path.json
+    Report any unmerged fields, break the problem report down both
+    by field, and by qso and output the report as a .json file
     """
-    # see what we have left, and report
     problems = [qso for qso in qsos if '_UNMERGED' in qso]
-    if problems:
-        with open(path, "w") as wfd:
-            json.dump(problems, wfd, indent=4, sort_keys=True)
     dupe_fields = {}
     for qso in problems:
-        for dupe in qso['_UNMERGED'].values():
+        for source, dupe in qso['_UNMERGED'].items():
             qso_id = "{}_{}_{}_{}".format(
                 qso['CALL'], qso['QSO_DATE'], qso['TIME_ON'], qso['BAND'])
             for field in dupe.keys():
                 if field not in dupe_fields:
-                    dupe_fields[field] = {'count': 0, 'qsos': []}
-                if qso_id not in dupe_fields[field]['qsos']:
+                    dupe_fields[field] = {
+                        'count': 0,
+                        'qsos': {}
+                    }
+                if qso_id not in dupe_fields[field]['qsos'].keys():
                     dupe_fields[field]['count'] += 1
-                    dupe_fields[field]['qsos'].append(qso_id)
-    (head, tail) = os.path.split(path)
-    summary_path = os.path.join(head, "sum_" + tail)
-    with open(summary_path, "w") as wfd:
-        json.dump(dupe_fields, wfd, indent=4, sort_keys=True)
+                    dupe_fields[field]['qsos'][qso_id] = {
+                        '#SELECTED#': qso[field]
+                    }
+                dupe_fields[field]['qsos'][qso_id][source] = dupe[field]
+    if problems:
+        report = {
+            'problems_by_field': dupe_fields,
+            'problems_by_qso': problems,
+        }
+        with open(path, "w") as wfd:
+            json.dump(report, wfd, indent=4, sort_keys=True)
 
 
 def adif_write(stream, qsos, minimal=False):
