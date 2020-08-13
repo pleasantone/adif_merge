@@ -262,7 +262,7 @@ def merge_two_qsos(first, dupe):
     return first
 
 
-def merge_qsos(qsos):
+def merge_qsos(qsos, window):
     """
     First bucketize all QSOs by unique fields, then chunk them off by time
     """
@@ -276,12 +276,13 @@ def merge_qsos(qsos):
     # this depends upon sorted above
     for entries in buckets.values():
         first = entries[0]
-        cutoff = adif_io.time_on(first) + timedelta(seconds=MERGE_WINDOW)
+        cutoff = adif_io.time_on(first) + timedelta(seconds=window)
         for qso in entries[1:]:
             if adif_io.time_on(qso) < cutoff:
                 merge_two_qsos(first, qso)
             else:
                 first = qso
+                cutoff = adif_io.time_on(first) + timedelta(seconds=window)
 
     # remove any residual unmerged crap from the top list
     for entry, values in buckets.items():
@@ -392,6 +393,8 @@ def main():
                         default="qso_merged.adif")
     parser.add_argument('--minimal', '-m', action='store_true',
                         help="Only output important fields")
+    parser.add_argument('--merge-window', type=int, default=MERGE_WINDOW,
+                        help="Time window for merging discrepent log entries")
     parser.add_argument('--csv', '-c', type=str,
                         help="WSJT-X compatible .log file")
     parser.add_argument('--version', '-v', action='version',
@@ -410,7 +413,7 @@ def main():
     for qso in qsos:
         fixup_qso(qso)
 
-    qsos = merge_qsos(qsos)
+    qsos = merge_qsos(qsos, args.merge_window)
 
     if args.problems:
         dump_problems(qsos, args.problems)
