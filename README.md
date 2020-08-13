@@ -1,10 +1,8 @@
-adif_merge.py
-=============
+# adif_merge.py
 
 Ham Radio ADIF Logbook format merge/resolution program written in Python
 
-Summary
--------
+## Summary
 
 This tool is designed to merge and resolve multiple ADIF files, including
 partial information from different reported sources (e.g. previous
@@ -38,21 +36,19 @@ commented, including caveats and is designed to be easily modifiable.
 Use the `-p <filename>.json` option to generate problem QSO output in
 JSON format to see where there were conflicts and how we resolved them.
 
-Installation
-------------
+## Installation
 
-Developed under python 3 > 3.5
+Developed under python 3 >= 3.6
 
-Installation requires the `adif_io` python module::
+```
+    pip3 install adif_merge
+```
 
-    pip3 install adif_io
-
-Sample usage
-------------
+## Sample usage
 
 Here's what I do to merge my WSJT and GridTracker managed logs::
 
-    adif_merge.py -o mergedlog.adif -c merged_wsjtx.log -p problems.json \
+    adif_merge -o mergedlog.adif -c merged_wsjtx.log -p problems.json \
             ~/.local/share/WSJT-X/wsjtx_log.adi ~/Documents/GridTracker/*.adif
 
 Please use the `--problem` option to look at merge issues that the
@@ -64,8 +60,7 @@ list of unresolved issues you may wish to fix--first organized by field,
 and again organized by QSO.
 
 
-Feedback & Disclaimer
----------------------
+## Feedback & Disclaimer
 
 This code is learning and evolving. Please save copies of all of your
 log files before replacing them with this augmented file.
@@ -75,8 +70,8 @@ to merge, such as frequency harmonization or deferring to LoTW when
 there is a conflict for some fields, please let me know.
 
 
-Copyright & License
--------------------
+## Copyright & License
+
 Copyright (c) 2020 by Paul Traina, All rights reserved.
 
 This program is free software: you can redistribute it and/or modify
