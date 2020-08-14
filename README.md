@@ -10,13 +10,13 @@ uploads to LoTW, QRZ, clublog, et al. Each of these sources tend to
 "augment" log entries with their own additional information.
 
 The motivation for this is that GridTracker <https://tagloomis.com/> and
-other logging programs are able to not only send log entries to remote
+several logging programs are able to not only send log entries to remote
 services, but also automatically download ADIF files back from them.
 I found myself with a bunch of ADIF files, but none of them really gave
 me the whole picture of my QSOs. I also have both a home and portable
 station and sometimes I'd forget to move my logs between the two. This
-allows me to merge those logs at a later date (or reconstruct them
-from external servers).
+allows me to merge those logs at a later date (or reconstruct them from
+external servers).
 
 The code will look at multiple log entries that occur with the same band,
 call, and mode within 90 seconds of each other and attempt to merge
@@ -26,9 +26,7 @@ or different rounding of times on and off (to the nearest minute).
 
 It tries to automate the decision making process for conflicts between
 log entries, and will tend to treat .adif files with "lotw" in their
-name as more authoritative for some fields, for instance, if there is
-a conflict between QRZ and LOTW on ITU and CQ zones, since they are
-calculated by ARRL and manually entered by QRZ.
+name as more authoritative for some fields.
 
 For a complete look at the decision making process, read the code.  It's
 commented, including caveats and is designed to be easily modifiable.
