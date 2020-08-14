@@ -37,7 +37,7 @@ from datetime import datetime, timedelta
 
 import adif_io
 
-__VERSION__ = "1.0.0"
+__VERSION__ = "1.0.1"
 
 # merge any calls in the same band and same mode within 90 seconds
 MERGE_WINDOW = 90
