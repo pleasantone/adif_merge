@@ -117,14 +117,14 @@ def fixup_qso(qso):
             del qso[field]
 
 
-def lotw_override(field, first, dupe):
+def source_override(field, source, first, dupe):
     """
     If this field disagrees with LoTW, chose LoTW (use this sparingly,
     remember that LoTW records can never be edited after upload so they
     could be bogus as well.
     """
-    if field in dupe and 'LOTW' in dupe['_SOURCE_FILE'].upper():
-        logging.debug("LoTW override %s/%s: %s %s <- %s",
+    if field in dupe and source.upper() in dupe['_SOURCE_FILE'].upper():
+        logging.debug("source override %s/%s: %s %s <- %s",
                       first['CALL'], adif_io.time_on(first),
                       field, first[field], dupe[field])
         first[field] = dupe[field]
@@ -146,8 +146,7 @@ def merge_dupe_fields(field, first, dupe):
     if first[field] == dupe[field]:
         del dupe[field]
         return
-    # special-case COUNTRY and COUNTY before other text fields in general
-    if field in ['CNTY', 'COUNTRY']:
+    if field in ['CNTY']:
         fnslc = first[field].replace(" ", "").lower()
         dnslc = dupe[field].replace(" ", "").lower()
         if fnslc == dnslc:
@@ -161,7 +160,8 @@ def merge_dupe_fields(field, first, dupe):
         elif dnslc in fnslc:
             del dupe[field]
         return
-    if field in ['NAME']:
+    if field in ['NAME', 'COMMENT']:
+        # prefer mixed case to uppercase only entries
         if first[field].lower() == dupe[field].lower():
             if first[field].isupper():
                 first[field] = dupe[field]
@@ -184,8 +184,10 @@ def merge_dupe_fields(field, first, dupe):
         if dupe[field] == 'Y':
             first[field] = 'Y'
         del dupe[field]
-    if field.startswith("APP_LOTW_") or field in ['QSLRDATE']:
-        lotw_override(field, first, dupe)
+    if field.startswith("APP_LOTW_") or field in ['DXCC', 'COUNTRY', 'QSLRDATE']:
+        source_override(field, 'LOTW', first, dupe)
+    if field.startswith("APP_QRZLOG_") or field.startswith("QRZCOM_"):
+        source_override(field, 'QRZ', first, dupe)
 
 
 def merge_two_qsos(first, dupe):
