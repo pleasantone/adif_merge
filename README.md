@@ -49,7 +49,7 @@ Here's what I do to merge my WSJT and GridTracker managed logs::
     adif_merge -o mergedlog.adif -c merged_wsjtx.log -p problems.json \
             ~/.local/share/WSJT-X/wsjtx_log.adi ~/Documents/GridTracker/*.adif
 
-Please use the `--problem` option to look at merge issues that the
+Please use the `--problems` option to look at merge issues that the
 program wasn't confident about resolving.  For example QRZ and LoTW
 often differ about user-entered information like ITU and CQ zones.
 
