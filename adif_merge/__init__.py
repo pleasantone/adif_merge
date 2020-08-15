@@ -286,7 +286,7 @@ def adif_write(stream, qsos, minimal=False):
             if field in qso:
                 adif_write_field(stream, field, qso[field])
         if not minimal:
-            for field in qso:
+            for field in sorted(qso):
                 if field[0] == "_":
                     continue
                 if field not in FIELD_ORDER:
