@@ -39,7 +39,7 @@ import adif_io
 
 __VERSION__ = "1.0.1"
 
-# merge any calls in the same band and same mode within 90 seconds
+# merge any calls in the same band and same mode within 115 seconds
 MERGE_WINDOW = 115
 
 
