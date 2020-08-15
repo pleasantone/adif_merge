@@ -117,18 +117,15 @@ def fixup_qso(qso):
             del qso[field]
 
 
-def source_override(field, source, first, dupe):
-    """
-    If this field disagrees with LoTW, chose LoTW (use this sparingly,
-    remember that LoTW records can never be edited after upload so they
-    could be bogus as well.
-    """
-    if field in dupe and source.upper() in dupe['_SOURCE_FILE'].upper():
-        logging.debug("source override %s/%s: %s %s <- %s",
-                      first['CALL'], adif_io.time_on(first),
-                      field, first[field], dupe[field])
-        first[field] = dupe[field]
-        del dupe[field]
+# If dupe comes from one of these sources, prefer dupe records over
+# anything else we've already merged.
+SOURCE_OVERRIDES={
+    'LOTW': r'APP_LOTW_|LOTW_|AARL_SECT|DXCC$|COUNTRY$',
+    'QRZ':  r'APP_QRZCOM_|QRZCOM_',
+    'EQSL': r'APP_EQSL_|EQSL',
+    'CLUBLOG': r'APP_CLUBLOG_|CLUBLOG_',
+    'HRDLOG': r'APP_HRDLOG_|HRDLOG_',
+}
 
 
 def merge_dupe_fields(field, first, dupe):
@@ -137,7 +134,7 @@ def merge_dupe_fields(field, first, dupe):
     """
     if field[0] == "_":                 # don't touch internal metadata
         return
-    if field in first and field not in dupe:
+    if field not in dupe:
         return
     if field not in first:
         first[field] = dupe[field]
@@ -184,10 +181,10 @@ def merge_dupe_fields(field, first, dupe):
         if dupe[field] == 'Y':
             first[field] = 'Y'
         del dupe[field]
-    if field.startswith("APP_LOTW_") or field in ['DXCC', 'COUNTRY', 'QSLRDATE']:
-        source_override(field, 'LOTW', first, dupe)
-    if field.startswith("APP_QRZLOG_") or field.startswith("QRZCOM_"):
-        source_override(field, 'QRZ', first, dupe)
+    for source, match in SOURCE_OVERRIDES.items():
+        if source in dupe['_SOURCE_FILE'].upper() and re.match(match, field):
+            first[field] = dupe[field]
+            del dupe[field]
 
 
 def merge_two_qsos(first, dupe):
