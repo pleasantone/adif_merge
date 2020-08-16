@@ -63,19 +63,17 @@ FIELD_ORDER = [
 ZONE_FIELDS = ['MY_CQ_ZONE', 'CQZ', 'MY_ITU_ZONE', 'ITUZ']
 
 
-def fixup_qso(qso):
+def fixup_qso(qso, path=None):
     """
     Pre-process an individual QSO record upon load and fix common mistakes.
     """
     for field in qso.keys():
         if isinstance(qso[field], str):
             qso[field] = qso[field].strip()
-
     # fixup misreporting of FT4 mode
     if qso.get('MODE') == "FT4":
         qso['MODE'] = "MFSK"
         qso['SUBMODE'] = "FT4"
-
     # TX_PWR should only be digits
     if 'TX_PWR' in qso:
         if qso['TX_PWR'] == "NaN":
@@ -84,42 +82,39 @@ def fixup_qso(qso):
             match = re.search(r'(\d+)[Ww]', qso['TX_PWR'])
             if match:
                 qso['TX_PWR'] = match.group(1)
-
     # band should always be uppercase
     for field in ['BAND', 'BAND_RX']:
         if field in qso:
             qso[field] = qso[field].upper()
-
     # some log sources replace / with _, restore /
     for field in ['CALL', 'MYCALL']:
         if field in qso:
             qso[field] = qso[field].replace("_", "/").upper()
-
     # properly "caseify" gridsquares... it's unnecessary but pleasant
     for field in ['GRIDSQUARE', 'MY_GRIDSQUARE']:
         if field in qso:
             qso[field] = "{}{}".format(
                 qso[field][0:4].upper(), qso[field][4:].lower())
-
     # the following fields are really integers
     for field in ['TX_PWR', 'DXCC', 'DISTANCE'] + ZONE_FIELDS:
         if field in qso:
             qso[field] = int(qso[field])
-
     # the following fields are floats, but should be truncated
     for field in ['FREQ', 'FREQ_RX']:
         if field in qso:
             qso[field] = round(float(qso[field]), 3)
-
     # remove bad LAT/LON entries
     for field in ['LAT', 'LON']:
         if field in qso and qso[field][1:] == "000 00.000":
             del qso[field]
+    if path:
+        qso['_SOURCE_FILE'] = path
+    return qso
 
 
 # If dupe comes from one of these sources, prefer dupe records over
 # anything else we've already merged.
-SOURCE_OVERRIDES={
+SOURCE_OVERRIDES = {
     'LOTW': r'APP_LOTW_|LOTW_|AARL_SECT|DXCC$|COUNTRY$',
     'QRZ':  r'APP_QRZCOM_|QRZCOM_',
     'EQSL': r'APP_EQSL_|EQSL',
@@ -156,7 +151,6 @@ def merge_dupe_fields(field, first, dupe):
             del dupe[field]
         elif dnslc in fnslc:
             del dupe[field]
-        return
     if field in ['NAME', 'COMMENT']:
         # prefer mixed case to uppercase only entries
         if first[field].lower() == dupe[field].lower():
@@ -278,6 +272,21 @@ def dump_problems(qsos, path):
             json.dump(report, wfd, indent=4, sort_keys=True)
 
 
+def adif_write_field(stream, field, entry, comment=""):
+    """
+    Write a single field out for a QSO in <field:length>[data] format.
+    Separate them with spaces.
+    """
+    if field in ZONE_FIELDS:
+        entry = "{:02d}".format(int(entry))
+    else:
+        entry = str(entry)
+    if comment:
+        comment = " //" + comment
+    print("<{}:{}>{}{}".format(field.lower(), len(entry), entry, comment),
+          file=stream, end=" ")
+
+
 def adif_write(stream, qsos, minimal=False):
     """
     Write an array of QSOs to an ADIF file stream.
@@ -299,21 +308,6 @@ def adif_write(stream, qsos, minimal=False):
                 if field not in FIELD_ORDER:
                     adif_write_field(stream, field, qso[field])
         print("<eor>", file=stream)
-
-
-def adif_write_field(stream, field, entry, comment=""):
-    """
-    Write a single field out for a QSO in <field:length>[data] format.
-    Separate them with spaces.
-    """
-    if field in ZONE_FIELDS:
-        entry = "{:02d}".format(int(entry))
-    else:
-        entry = str(entry)
-    if comment:
-        comment = " //" + comment
-    print("<{}:{}>{}{}".format(field.lower(), len(entry), entry, comment),
-          file=stream, end=" ")
 
 
 def date_format_wsjt(native) -> str:
@@ -339,6 +333,51 @@ def time_format_wsjt(native) -> str:
     return ""
 
 
+def csv_write(csvfile, qsos) -> None:
+    """
+    Write the final merged list of QSOs to a WSJT-X compatible
+    CSV file.
+    """
+    writer = csv.writer(
+        csvfile, delimiter=',', quotechar='"',
+        quoting=csv.QUOTE_MINIMAL,
+        lineterminator=os.linesep)
+    for qso in qsos:
+        writer.writerow([
+            date_format_wsjt(qso['QSO_DATE']),
+            time_format_wsjt(qso['TIME_ON']),
+            date_format_wsjt(qso.get('QSO_DATE_OFF')),
+            time_format_wsjt(qso.get('TIME_OFF')),
+            qso['CALL'],
+            qso.get('GRIDSQUARE', ""),
+            qso.get('FREQ', ""),
+            qso.get('SUBMODE', qso.get('MODE', "")),
+            qso.get('RST_SENT', ""),
+            qso.get('RST_RCVD', ""),
+            qso.get('TX_PWR', ""),
+            qso.get('COMMENT', ""),
+            qso.get('NAME', "")
+        ])
+
+
+def read_adif_file(path) -> list:
+    """
+    Attempt to read and process an ADIF file and return all of the
+    QSO information.
+
+    This is complicated by the fact that LoTW files may not be unicode
+    encoded, and might be ISO-8859-15. First attempt to read the file
+    using unicode, should that fail, revert to character detection.
+    """
+    try:
+        with open(path) as adif_file:
+            adif_string = adif_file.read()
+    except UnicodeDecodeError:
+        with open(path, encoding="latin-1") as adif_file:
+            adif_string = adif_file.read()
+    return adif_io.read_from_string(adif_string)
+
+
 def main():
     """
     Load ADIF files, clean each qso individually produce output
@@ -362,13 +401,9 @@ def main():
 
     qsos = []
     for path in args.input:
-        qsos_raw, _adif_header = adif_io.read_from_file(path)
-        for qso in qsos_raw:
-            qso['_SOURCE_FILE'] = os.path.basename(path)
-        qsos = qsos + qsos_raw
-
-    for qso in qsos:
-        fixup_qso(qso)
+        raw, _adif_header = read_adif_file(path)
+        processed = [fixup_qso(qso, os.path.basename(path)) for qso in raw]
+        qsos += processed
 
     qsos = merge_qsos(qsos, args.merge_window)
 
@@ -381,26 +416,7 @@ def main():
 
     if args.csv:
         with open(args.csv, "w") as csvfile:
-            csvwriter = csv.writer(
-                csvfile, delimiter=',', quotechar='"',
-                quoting=csv.QUOTE_MINIMAL,
-                lineterminator=os.linesep)
-            for qso in qsos:
-                csvwriter.writerow([
-                    date_format_wsjt(qso['QSO_DATE']),
-                    time_format_wsjt(qso['TIME_ON']),
-                    date_format_wsjt(qso.get('QSO_DATE_OFF')),
-                    time_format_wsjt(qso.get('TIME_OFF')),
-                    qso['CALL'],
-                    qso.get('GRIDSQUARE', ""),
-                    qso.get('FREQ', ""),
-                    qso.get('SUBMODE', qso.get('MODE', "")),
-                    qso.get('RST_SENT', ""),
-                    qso.get('RST_RCVD', ""),
-                    qso.get('TX_PWR', ""),
-                    qso.get('COMMENT', ""),
-                    qso.get('NAME', "")
-                ])
+            csv_write(csvfile, qsos)
 
 
 if __name__ == "__main__":
