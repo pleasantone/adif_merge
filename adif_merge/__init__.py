@@ -60,7 +60,17 @@ FIELD_ORDER = [
     'NAME',
 ]
 
-ZONE_FIELDS = ['MY_CQ_ZONE', 'CQZ', 'MY_ITU_ZONE', 'ITUZ']
+# ADIF 3.1.0 specifies field properties
+FIELD_INTEGERS = [
+    'K_INDEX', 'NR_BURSTS', 'NR_PINGS', 'SFI', 'SRX', 'STX']
+FIELD_INTEGERS_POS = [
+    'CQZ', 'FISTS', 'FISTS_CC', 'IOTA_ISLAND_ID', 'ITUZ',
+    'MY_CQ_ZONE', 'MY_FISTS', 'MY_IOTA_ISLAND_ID', 'MY_ITU_ZONE',
+    'TEN_TEN', 'UKMSG']
+FIELD_NUMBERS = [
+    'AGE', 'A_INDEX', 'ANT_AZ', 'ANT_EL', 'DISTANCE', 'FREQ', 'FREQ_RX',
+    'MAX_BURSTS', 'RX_PWR', 'TX_PWR']
+FIELD_ZONES = ['MY_CQ_ZONE', 'CQZ', 'MY_ITU_ZONE', 'ITUZ']
 
 
 def fixup_qso(qso, path=None):
@@ -75,13 +85,30 @@ def fixup_qso(qso, path=None):
         qso['MODE'] = "MFSK"
         qso['SUBMODE'] = "FT4"
     # TX_PWR should only be digits
-    if 'TX_PWR' in qso:
-        if qso['TX_PWR'] == "NaN":
-            del qso['TX_PWR']
-        else:
-            match = re.search(r'(\d+)[Ww]', qso['TX_PWR'])
-            if match:
-                qso['TX_PWR'] = match.group(1)
+    for field in ['TX_PWR', 'RX_PWR']:
+        if field in qso:
+            if qso[field] == "NaN":
+                del qso[field]
+            else:
+                match = re.search(r'([\d\.]+)[Ww]', qso[field])
+                if match:
+                    qso[field] = match.group(1)
+    # if the field is a "PositiveInteger" or "Integer" field, make it an int
+    for field in FIELD_INTEGERS + FIELD_INTEGERS_POS:
+        if field in qso:
+            qso[field] = int(qso[field])
+    # if the field is a "Number" make it a float, unless it's whole in which case int
+    for field in FIELD_NUMBERS:
+        if field in qso:
+            qso[field] = float(qso[field])
+            if field in ['FREQ', 'FREQ_TX']:
+                # round to 3 digits
+                qso[field] = round(qso[field], 3)
+            else:
+                # leave as an int if possible, otherwise float
+                (part, whole) = math.modf(float(qso[field]))
+                if not part:
+                    qso[field] = int(whole)
     # band should always be uppercase
     for field in ['BAND', 'BAND_RX']:
         if field in qso:
@@ -95,14 +122,6 @@ def fixup_qso(qso, path=None):
         if field in qso:
             qso[field] = "{}{}".format(
                 qso[field][0:4].upper(), qso[field][4:].lower())
-    # the following fields are really integers
-    for field in ['TX_PWR', 'DXCC', 'DISTANCE'] + ZONE_FIELDS:
-        if field in qso:
-            qso[field] = int(qso[field])
-    # the following fields are floats, but should be truncated
-    for field in ['FREQ', 'FREQ_RX']:
-        if field in qso:
-            qso[field] = round(float(qso[field]), 3)
     # remove bad LAT/LON entries
     for field in ['LAT', 'LON']:
         if field in qso and qso[field][1:] == "000 00.000":
@@ -139,8 +158,8 @@ def merge_dupe_fields(field, first, dupe):
         del dupe[field]
         return
     if field in ['CNTY']:
-        fnslc = first[field].replace(" ", "").lower()
-        dnslc = dupe[field].replace(" ", "").lower()
+        fnsfc = first[field].replace(" ", "").casefold()
+        dnsfc = dupe[field].replace(" ", "").casefold()
         if fnslc == dnslc:
             # if dupe had spaces, use the one with spaces
             if len(first[field]) < len(dupe[field]):
@@ -153,7 +172,7 @@ def merge_dupe_fields(field, first, dupe):
             del dupe[field]
     if field in ['NAME', 'COMMENT']:
         # prefer mixed case to uppercase only entries
-        if first[field].lower() == dupe[field].lower():
+        if first[field].casefold() == dupe[field].casefold():
             if first[field].isupper():
                 first[field] = dupe[field]
             del dupe[field]
@@ -277,7 +296,7 @@ def adif_write_field(stream, field, entry, comment=""):
     Write a single field out for a QSO in <field:length>[data] format.
     Separate them with spaces.
     """
-    if field in ZONE_FIELDS:
+    if field in FIELD_ZONES:
         entry = "{:02d}".format(int(entry))
     else:
         entry = str(entry)
