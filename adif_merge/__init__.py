@@ -59,6 +59,15 @@ FIELD_ORDER = [
     'NAME',
 ]
 
+# You can't have a QSO without these minimum things (ADIF 3.1.0 spec)
+FIELD_MANDATORY = [
+    'QSO_DATE',
+    'TIME_ON',
+    'CALL',
+    'BAND',
+    'MODE'
+]
+
 # ADIF 3.1.0 specifies field properties
 FIELD_INTEGERS = [
     'K_INDEX', 'NR_BURSTS', 'NR_PINGS', 'SFI', 'SRX', 'STX']
@@ -71,18 +80,59 @@ FIELD_NUMBERS = [
     'MAX_BURSTS', 'RX_PWR', 'TX_PWR']
 FIELD_ZONES = ['MY_CQ_ZONE', 'CQZ', 'MY_ITU_ZONE', 'ITUZ']
 
+# these are not complete, just the common screwups
+FIELD_MODES = {
+    'DOMINO': ['DOMINOEX', 'DOMINOF'],
+    'JT4': ['JT4A', 'JT4B', 'JT4C', 'JT4D', 'JT4E', 'JT4F', 'JT4G'],
+    'JT65': ['JT65A', 'JT65B', 'JT65B2', 'JT65C', 'JT65C2'],
+    'JT9': ['JT9-1', 'JT9-2', 'JT9-5', 'JT9-10', 'JT9-30',
+            'JT9A', 'JT9B', 'JT9C', 'JT9D', 'JT9E', 'JT9E FAST', 'JT9F', 'JT9F FAST',
+            'JT9G', 'JT9G FAST', 'JT9H', 'JT9H FAST'],
+    'MFSK': ['FSQCALL', 'FT4', 'JS8', 'MFSK4', 'MFSK8', 'MFSK11', 'MFSK16',
+              'MFSK22', 'MFSK31', 'MFSK32', 'MFSK64', 'MFSK128'],
+    'OLIVIA': ['OLIVIA 4/125', 'OLIVIA 4/250', 'OLIVIA 8/250', 'OLIVIA 8/500',
+               'OLIVIA 16/500', 'OLIVIA 16/1000', 'OLIVIA 32/1000'],
+    'PSK': ['FSK31', 'PSK10', 'PSK31', 'PSK63', 'PSK63F', 'PSK125', 'PSK250', 'PSK500',
+            'PSK1000', 'PSKAM10', 'PSKAM31', 'PSKAM50', 'PSKFEC31', 'QPSK31', 'QPSK63',
+            'QPSK125', 'QPSK250', 'QPSK500', 'SIM31'],
+    'QRA64': ['QRA64A, QRA64B, QRA64C, QRA64D, QRA64E'],
+    'RTTY': ['ASCI'],
+    'SSB': ['USB', 'LSB'],
+}
+FIELD_MODES_REVERSE = {
+    submode: mode for mode, submodes in FIELD_MODES.items() for submode in submodes
+}
 
-def fixup_qso(qso, path=None):
+
+def fixup_qso_mode(qso, path):
+    """
+    Some log programs don't follow the ADIF spec on modes and submodes, fix them
+    """
+    real_mode = FIELD_MODES_REVERSE.get(qso['MODE'])
+    if real_mode:
+        if 'SUBMODE' in qso:
+            logger.warning("Bad QSO MODE/SUBMODE in %s: %s",
+                           path, "/".join([qso[field] for field in FIELD_MANDATORY]))
+        else:
+            qso['SUBMODE'] = qso['MODE']
+            qso['MODE'] = real_mode
+    return qso
+
+
+def fixup_qso(qso, path=""):
     """
     Pre-process an individual QSO record upon load and fix common mistakes.
     """
+    missing_mandatory = {field for field  in FIELD_MANDATORY if field not in qso}
+    if missing_mandatory:
+        logging.warning("Ignoring QSO in %s, missing %s: %s",
+                        path, "/".join(missing_mandatory),
+                        "/".join([qso.get(field, field.lower()) for field in FIELD_MANDATORY]))
+        return {}
     for field in qso.keys():
         if isinstance(qso[field], str):
             qso[field] = qso[field].strip()
-    # fixup misreporting of FT4 mode
-    if qso.get('MODE') == "FT4":
-        qso['MODE'] = "MFSK"
-        qso['SUBMODE'] = "FT4"
+    qso = fixup_qso_mode(qso, path)
     # TX_PWR should only be digits
     for field in ['TX_PWR', 'RX_PWR']:
         if field in qso:
@@ -93,9 +143,11 @@ def fixup_qso(qso, path=None):
                 if match:
                     qso[field] = match.group(1)
     # if the field is a "PositiveInteger" or "Integer" field, make it an int
+    # some broken logbooks (e.g. HRD) generate Numbers where there should be
+    # Integers--accept them but turn them into ints.
     for field in FIELD_INTEGERS + FIELD_INTEGERS_POS:
         if field in qso:
-            qso[field] = int(qso[field])
+            qso[field] = int(float(qso[field]))
     # if the field is a "Number" make it a float, unless it's whole in which case int
     for field in FIELD_NUMBERS:
         if field in qso:
@@ -157,8 +209,8 @@ def merge_dupe_fields(field, first, dupe):
         del dupe[field]
         return
     if field in ['CNTY']:
-        fnsfc = first[field].replace(" ", "").casefold()
-        dnsfc = dupe[field].replace(" ", "").casefold()
+        fnslc = first[field].replace(" ", "").casefold()
+        dnslc = dupe[field].replace(" ", "").casefold()
         if fnslc == dnslc:
             # if dupe had spaces, use the one with spaces
             if len(first[field]) < len(dupe[field]):
@@ -231,7 +283,7 @@ def merge_qsos(qsos, window):
     """
     buckets = {}
     for qso in sorted(qsos, key=adif_io.time_on):
-        key = "{}_{}_{}".format(qso['CALL'], qso['BAND'], qso['MODE'])
+        key = "{}_{}_{}_{}".format(qso['CALL'], qso['BAND'], qso.get('MODE'), qso.get('SUBMODE'))
         if key not in buckets:
             buckets[key] = []
         buckets[key].append(qso)
@@ -404,24 +456,33 @@ def main():
     parser = argparse.ArgumentParser(description="Merge ADIF files")
     parser.add_argument('--problems', '-p', type=str,
                         help="Intermediate problem output .json")
-    parser.add_argument('--output', '-o', type=str,
-                        default="qso_merged.adif")
+    parser.add_argument('--output', '-o', type=str, default="qso_merged.adif",
+                        help="Merged log output .adif")
     parser.add_argument('--minimal', '-m', action='store_true',
                         help="Only output important fields")
     parser.add_argument('--merge-window', type=int, default=MERGE_WINDOW,
                         help="Time window for merging discrepent log entries")
     parser.add_argument('--csv', '-c', type=str,
                         help="WSJT-X compatible .log file")
+    parser.add_argument('--log-level', type=str, default="info",
+                        help="Log level for debugging")
     parser.add_argument('--version', '-v', action='version',
                         version="%(prog)s {version}".format(version=__VERSION__))
     parser.add_argument('input', type=str, nargs="+",
                         help="Input file list")
     args = parser.parse_args()
 
+    numeric_level = getattr(logging, args.log_level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError("Invalid log-level: {}".format(args.log_level))
+    logging.basicConfig(format='%(levelname)s: %(message)s', level=numeric_level)
+
     qsos = []
     for path in args.input:
         raw, _adif_header = read_adif_file(path)
-        processed = [fixup_qso(qso, os.path.basename(path)) for qso in raw]
+        filename = os.path.basename(path)
+        processed = [fixup_qso(qso, filename) for qso in raw]
+        processed = [qso for qso in processed if qso] # remove invalid qsos
         qsos += processed
 
     qsos = merge_qsos(qsos, args.merge_window)
