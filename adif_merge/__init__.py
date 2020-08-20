@@ -42,6 +42,9 @@ __VERSION__ = "1.1.0"
 # merge any calls in the same band and same mode within 115 seconds
 MERGE_WINDOW = 115
 
+# ADIF files are supposed to be strict ascii, but conventionally they are really ISO-8859-1
+ADIF_ENCODING = "latin-1"
+
 # WSJT-X generated fields, minimal output fields as well
 FIELD_ORDER = [
     'CALL',
@@ -89,7 +92,7 @@ FIELD_MODES = {
             'JT9A', 'JT9B', 'JT9C', 'JT9D', 'JT9E', 'JT9E FAST', 'JT9F', 'JT9F FAST',
             'JT9G', 'JT9G FAST', 'JT9H', 'JT9H FAST'],
     'MFSK': ['FSQCALL', 'FT4', 'JS8', 'MFSK4', 'MFSK8', 'MFSK11', 'MFSK16',
-              'MFSK22', 'MFSK31', 'MFSK32', 'MFSK64', 'MFSK128'],
+             'MFSK22', 'MFSK31', 'MFSK32', 'MFSK64', 'MFSK128'],
     'OLIVIA': ['OLIVIA 4/125', 'OLIVIA 4/250', 'OLIVIA 8/250', 'OLIVIA 8/500',
                'OLIVIA 16/500', 'OLIVIA 16/1000', 'OLIVIA 32/1000'],
     'PSK': ['FSK31', 'PSK10', 'PSK31', 'PSK63', 'PSK63F', 'PSK125', 'PSK250', 'PSK500',
@@ -104,18 +107,23 @@ FIELD_MODES_REVERSE = {
 }
 
 
-def fixup_qso_mode(qso, path):
+class ADIFMalformedQSOError(ValueError):
+    """Malformed ADIF QSO Entry"""
+    def __init__(self, expression, message):
+        self.expression = expression
+        self.message = message
+        super().__init__(message)
+
+
+def fixup_qso_mode(qso):
     """
     Some log programs don't follow the ADIF spec on modes and submodes, fix them
     """
-    real_mode = FIELD_MODES_REVERSE.get(qso['MODE'])
+    mode = qso['MODE']
+    real_mode = FIELD_MODES_REVERSE.get(mode)
     if real_mode:
-        if 'SUBMODE' in qso:
-            logger.warning("Bad QSO MODE/SUBMODE in %s: %s",
-                           path, "/".join([qso[field] for field in FIELD_MANDATORY]))
-        else:
-            qso['SUBMODE'] = qso['MODE']
-            qso['MODE'] = real_mode
+        qso['MODE'] = real_mode
+        qso['SUBMODE'] = mode
     return qso
 
 
@@ -123,16 +131,20 @@ def fixup_qso(qso, path=""):
     """
     Pre-process an individual QSO record upon load and fix common mistakes.
     """
+    if path:
+        qso['_SOURCE_FILE'] = path
+    # if we're missing a madatory field, mark the QSO and do not process any of it
     missing_mandatory = {field for field  in FIELD_MANDATORY if field not in qso}
     if missing_mandatory:
-        logging.warning("Ignoring QSO in %s, missing %s: %s",
-                        path, "/".join(missing_mandatory),
-                        "/".join([qso.get(field, field.lower()) for field in FIELD_MANDATORY]))
-        return {}
+        qso['_MISSING_FIELDS'] = list(missing_mandatory)
+        raise ADIFMalformedQSOError(qso, "{}: {} missing {}".format(
+            path,
+            "/".join([qso.get(field, field.lower()) for field in FIELD_MANDATORY]),
+            ", ".join(missing_mandatory)))
     for field in qso.keys():
         if isinstance(qso[field], str):
             qso[field] = qso[field].strip()
-    qso = fixup_qso_mode(qso, path)
+    qso = fixup_qso_mode(qso)
     # TX_PWR should only be digits
     for field in ['TX_PWR', 'RX_PWR']:
         if field in qso:
@@ -177,8 +189,6 @@ def fixup_qso(qso, path=""):
     for field in ['LAT', 'LON']:
         if field in qso and qso[field][1:] == "000 00.000":
             del qso[field]
-    if path:
-        qso['_SOURCE_FILE'] = path
     return qso
 
 
@@ -310,7 +320,7 @@ def merge_qsos(qsos, window):
     return sorted(merged_qsos, key=adif_io.time_on)
 
 
-def dump_problems(qsos, path):
+def dump_problems(qsos, malformed, path):
     """
     Report any unmerged fields, break the problem report down both
     by field, and by qso and output the report as a .json file
@@ -333,12 +343,13 @@ def dump_problems(qsos, path):
                         '#SELECTED#': qso[field]
                     }
                 dupe_fields[field]['qsos'][qso_id][source] = dupe[field]
-    if problems:
+    if problems or malformed:
         report = {
             'problems_by_field': dupe_fields,
             'problems_by_qso': problems,
+            'malformed_qsos': malformed,
         }
-        with open(path, "w") as wfd:
+        with open(path, "w", encoding=ADIF_ENCODING) as wfd:
             json.dump(report, wfd, indent=4, sort_keys=True)
 
 
@@ -440,7 +451,7 @@ def read_adif_file(path) -> list:
     windows cp1282, or unicode UTF-8 encoded.
     """
     try:
-        with open(path, encoding="latin-1") as adif_file:
+        with open(path, encoding=ADIF_ENCODING) as adif_file:
             adif_string = adif_file.read()
     except ValueError:
         logging.warning("%s: failed to read using latin-1 encoding, retrying as unicode", path)
@@ -478,25 +489,29 @@ def main():
     logging.basicConfig(format='%(levelname)s: %(message)s', level=numeric_level)
 
     qsos = []
+    malformed = []
     for path in args.input:
-        raw, _adif_header = read_adif_file(path)
         filename = os.path.basename(path)
-        processed = [fixup_qso(qso, filename) for qso in raw]
-        processed = [qso for qso in processed if qso] # remove invalid qsos
-        qsos += processed
+        raw, _adif_header = read_adif_file(path)
+        for qso in raw:
+            try:
+                qsos.append(fixup_qso(qso, filename))
+            except ADIFMalformedQSOError as err:
+                logging.warning("Ignoring QSO: %s", err.message)
+                malformed.append(err.expression)
 
     qsos = merge_qsos(qsos, args.merge_window)
 
     if args.problems:
-        dump_problems(qsos, args.problems)
+        dump_problems(qsos, malformed, args.problems)
 
     if args.output:
         # ADIF files are supposed to be ascii, not unicode, unfortunately.
-        with open(args.output, "w", encoding="latin-1") as adiffile:
+        with open(args.output, "w", encoding=ADIF_ENCODING) as adiffile:
             adif_write(adiffile, qsos, args.minimal)
 
     if args.csv:
-        with open(args.csv, "w") as csvfile:
+        with open(args.csv, "w", encoding=ADIF_ENCODING) as csvfile:
             csv_write(csvfile, qsos)
 
 
