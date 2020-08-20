@@ -42,7 +42,6 @@ __VERSION__ = "1.0.3"
 # merge any calls in the same band and same mode within 115 seconds
 MERGE_WINDOW = 115
 
-
 # WSJT-X generated fields, minimal output fields as well
 FIELD_ORDER = [
     'CALL',
@@ -384,15 +383,16 @@ def read_adif_file(path) -> list:
     Attempt to read and process an ADIF file and return all of the
     QSO information.
 
-    This is complicated by the fact that LoTW files may not be unicode
-    encoded, and might be ISO-8859-15. First attempt to read the file
-    using unicode, should that fail, revert to character detection.
+    This is complicated by the fact that ADIF files are defined to be
+    ascii only but nobody follows that convention, so they may be latin-1,
+    windows cp1282, or unicode UTF-8 encoded.
     """
     try:
-        with open(path) as adif_file:
-            adif_string = adif_file.read()
-    except UnicodeDecodeError:
         with open(path, encoding="latin-1") as adif_file:
+            adif_string = adif_file.read()
+    except ValueError:
+        logging.warning("%s: failed to read using latin-1 encoding, retrying as unicode", path)
+        with open(path, encoding="utf-8") as adif_file:
             adif_string = adif_file.read()
     return adif_io.read_from_string(adif_string)
 
@@ -430,7 +430,8 @@ def main():
         dump_problems(qsos, args.problems)
 
     if args.output:
-        with open(args.output, "w") as adiffile:
+        # ADIF files are supposed to be ascii, not unicode, unfortunately.
+        with open(args.output, "w", encoding="latin-1") as adiffile:
             adif_write(adiffile, qsos, args.minimal)
 
     if args.csv:
