@@ -33,6 +33,7 @@ import logging
 import math
 import re
 import os
+import string
 from datetime import datetime, timedelta
 
 import adif_io
@@ -41,6 +42,10 @@ __VERSION__ = "1.1.1"
 
 # merge any calls in the same band and same mode within 115 seconds
 MERGE_WINDOW = 115
+
+# merge any distances that are less than 5 (mi/km) or < 15% different
+MERGE_DISTANCE_ABS = 5
+MERGE_DISTANCE_PCT = 0.15
 
 # ADIF files are supposed to be strict ascii, but conventionally they are really ISO-8859-1
 ADIF_ENCODING = "latin-1"
@@ -73,7 +78,9 @@ FIELD_MANDATORY = [
 
 # ADIF 3.1.0 specifies field properties
 FIELD_INTEGERS = [
-    'K_INDEX', 'NR_BURSTS', 'NR_PINGS', 'SFI', 'SRX', 'STX']
+    'K_INDEX', 'NR_BURSTS', 'NR_PINGS', 'SFI', 'SRX', 'STX',
+    # this is an enumeration but treat it as an integer
+    'DXCC']
 FIELD_INTEGERS_POS = [
     'CQZ', 'FISTS', 'FISTS_CC', 'IOTA_ISLAND_ID', 'ITUZ',
     'MY_CQ_ZONE', 'MY_FISTS', 'MY_IOTA_ISLAND_ID', 'MY_ITU_ZONE',
@@ -107,12 +114,16 @@ FIELD_MODES_REVERSE = {
 }
 
 
-class ADIFMalformedQSOError(ValueError):
+class QSOError(ValueError):
     """Malformed ADIF QSO Entry"""
-    def __init__(self, expression, message):
-        self.expression = expression
-        self.message = message
-        super().__init__(message)
+    pass
+
+
+_WSTRANS = str.maketrans('', '', string.whitespace)
+
+def comparable_string(val):
+    """Remove all whitespace including crlf, tab, everything and casefold"""
+    return val.casefold().translate(_WSTRANS)
 
 
 def fixup_qso_mode(qso):
@@ -137,10 +148,10 @@ def fixup_qso(qso, path=""):
     missing_mandatory = {field for field  in FIELD_MANDATORY if field not in qso}
     if missing_mandatory:
         qso['_MISSING_FIELDS'] = list(missing_mandatory)
-        raise ADIFMalformedQSOError(qso, "{}: {} missing {}".format(
+        raise QSOError("{}: {} missing {}".format(
             path,
             "/".join([qso.get(field, field.lower()) for field in FIELD_MANDATORY]),
-            ", ".join(missing_mandatory)))
+            ", ".join(missing_mandatory)), qso)
     for field in qso.keys():
         if isinstance(qso[field], str):
             qso[field] = qso[field].strip()
@@ -154,6 +165,9 @@ def fixup_qso(qso, path=""):
                 match = re.search(r'([\d\.]+)[Ww]', qso[field])
                 if match:
                     qso[field] = match.group(1)
+                qso[field] = float(qso[field])
+                if qso[field] > 10000:
+                    qso[field] //= 10000
     # if the field is a "PositiveInteger" or "Integer" field, make it an int
     # some broken logbooks (e.g. HRD) generate Numbers where there should be
     # Integers--accept them but turn them into ints.
@@ -189,6 +203,19 @@ def fixup_qso(qso, path=""):
     for field in ['LAT', 'LON']:
         if field in qso and qso[field][1:] == "000 00.000":
             del qso[field]
+    # remove bogus zero fields (DXCC zero is valid)
+    for field in ['A_INDEX', 'K_INDEX', 'SFI', 'DISTANCE', 'TX_PWR', 'RX_PWR'] + FIELD_ZONES:
+        if field in qso and not qso[field]:
+            del qso[field]
+    # look for a redundant comment field that matches our RST_SENT and RST_RCVD
+    for field in ['COMMENT', 'NOTES']:
+        if field in qso and 'RST_SENT' in qso and 'RST_RCVD' in qso:
+            match = re.search(r'Sent:?\s*([+-]?\d+)\s+Rcvd:?\s*([+-]?\d+)',
+                              qso[field], re.IGNORECASE)
+            if match and match.group(1) == qso['RST_SENT'] and match.group(2) == qso['RST_RCVD']:
+                del qso[field]
+    if qso.get('IOTA', "").replace("-", "").lower().strip() == "none":
+        del qso['IOTA']
     return qso
 
 
@@ -196,10 +223,10 @@ def fixup_qso(qso, path=""):
 # anything else we've already merged.
 SOURCE_OVERRIDES = {
     'LOTW': r'APP_LOTW_|LOTW_|AARL_SECT|DXCC$|COUNTRY$',
-    'QRZ':  r'APP_QRZCOM_|QRZCOM_',
+    'QRZ':  r'APP_QRZCOM_|QRZCOM_|APP_QRZLOG_',
     'EQSL': r'APP_EQSL_|EQSL',
     'CLUBLOG': r'APP_CLUBLOG_|CLUBLOG_',
-    'HRDLOG': r'APP_HRDLOG_|HRDLOG_',
+    'HRD': r'APP_HRDLOG_|HRDLOG_|APP_HAMRADIODELUXE?_|HRDCOUNTRYNO$',
 }
 
 
@@ -218,24 +245,22 @@ def merge_dupe_fields(field, first, dupe):
     if first[field] == dupe[field]:
         del dupe[field]
         return
-    if field in ['CNTY']:
-        fnslc = first[field].replace(" ", "").casefold()
-        dnslc = dupe[field].replace(" ", "").casefold()
+    if field in ['NAME', 'MY_NAME', 'ADDRESS', 'MY_ADDRESS', 'STREET', 'MY_STREET',
+                 'CITY', 'MY_CITY', 'CNTY', 'MY_CNTY', 'STATE', 'MY_STATE',
+                 'COUNTRY', 'MY_COUNTRY',
+                 'MY_RIG', 'COMMENT', 'EMAIL', 'QSLMSG', 'WEB', 'PFX', 'QSL_VIA', 'QTH']:
+        fnslc = comparable_string(first[field])
+        dnslc = comparable_string(dupe[field])
+        # if dupe is identical but had whitespace, use the one with whitespace
+        # else use the longer one if one is a substring of the other
         if fnslc == dnslc:
-            # if dupe had spaces, use the one with spaces
-            if len(first[field]) < len(dupe[field]):
+            if len(first[field]) < len(dupe[field]) or first[field].isupper():
                 first[field] = dupe[field]
             del dupe[field]
         elif fnslc in dnslc:
             first[field] = dupe[field]
             del dupe[field]
         elif dnslc in fnslc:
-            del dupe[field]
-    if field in ['NAME', 'COMMENT']:
-        # prefer mixed case to uppercase only entries
-        if first[field].casefold() == dupe[field].casefold():
-            if first[field].isupper():
-                first[field] = dupe[field]
             del dupe[field]
     if field in ['TIME_ON', 'TIME_OFF', 'GRIDSQUARE']:
         # handle the present but empty case
@@ -251,9 +276,20 @@ def merge_dupe_fields(field, first, dupe):
                 del dupe[field]
             elif len(dupe[field]) <= len(first[field]):
                 del dupe[field]
-    if field in ['QSL_RCVD']:
-        if dupe[field] == 'Y':
-            first[field] = 'Y'
+    if field in ['DISTANCE']:
+        # if the distance difference is less that 5 miles or 15%, choose the longer
+        difference = abs(first[field] - dupe[field])
+        if difference < MERGE_DISTANCE_ABS or difference / first[field] < MERGE_DISTANCE_PCT:
+            first[field] = max(first[field], dupe[field])
+            del dupe[field]
+    if field in ['FREQ', 'FREQ_RX']:
+        if abs(first[field] - dupe[field]) < 0.01:
+            first[field] = max(first[field], dupe[field])
+            del dupe[field]
+    if field in ['QSL_RCVD', 'QSL_SENT', 'EQSL_QSL_SENT', 'EQSL_QSL_RCVD',
+                 'LOTW_QSL_SENT', 'LOTW_QSL_RCVD', 'QSO_RANDOM']:
+        if first[field] in ['N', 'R'] and dupe[field] in ['Y', 'V']:
+            first[field] = dupe[field]
         del dupe[field]
     if field in ['RST_SENT', 'RST_RCVD']:
         # prefer +/- reports over 3-digit reports which were probably
@@ -262,10 +298,16 @@ def merge_dupe_fields(field, first, dupe):
                 re.match(r'[+-]\d\d', dupe[field])):
             first[field] = dupe[field]
             del dupe[field]
-    for source, match in SOURCE_OVERRIDES.items():
-        if source in dupe['_SOURCE_FILE'].upper() and re.match(match, field):
+    if field in ['DXCC', 'A_INDEX', 'K_INDEX', 'SFI'] + FIELD_ZONES:
+        if dupe[field] and not first[field]:
             first[field] = dupe[field]
             del dupe[field]
+    if field in dupe:
+        for source, match in SOURCE_OVERRIDES.items():
+            if re.match(match, field):
+                if source in dupe['_SOURCE_FILE'].upper():
+                    first[field] = dupe[field]
+                del dupe[field]
 
 
 def merge_two_qsos(first, dupe):
@@ -464,7 +506,9 @@ def main():
     """
     Load ADIF files, clean each qso individually produce output
     """
-    parser = argparse.ArgumentParser(description="Merge ADIF files")
+    parser = argparse.ArgumentParser(
+        description="Merge ADIF files",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--problems', '-p', type=str,
                         help="Intermediate problem output .json")
     parser.add_argument('--output', '-o', type=str, default="qso_merged.adif",
@@ -496,9 +540,9 @@ def main():
         for qso in raw:
             try:
                 qsos.append(fixup_qso(qso, filename))
-            except ADIFMalformedQSOError as err:
-                logging.warning("Ignoring QSO: %s", err.message)
-                malformed.append(err.expression)
+            except QSOError as err:
+                logging.warning("Ignoring QSO: %s", err.args[0])
+                malformed.append(err.args[1])
 
     qsos = merge_qsos(qsos, args.merge_window)
 
