@@ -155,6 +155,7 @@ def fixup_qso(qso, path=""):
     for field in qso.keys():
         if isinstance(qso[field], str):
             qso[field] = qso[field].strip()
+    qso = {key: value for key, value in qso.items() if value}
     qso = fixup_qso_mode(qso)
     # TX_PWR should only be digits
     for field in ['TX_PWR', 'RX_PWR']:
