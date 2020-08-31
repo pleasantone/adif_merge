@@ -38,7 +38,9 @@ from datetime import datetime, timedelta
 
 import adif_io
 
+__PROGRAM__ = "adif_merge_pst"
 __VERSION__ = "1.1.2"
+__STANDARD__= "3.1.0"
 
 # merge any calls in the same band and same mode within 115 seconds
 MERGE_WINDOW = 115
@@ -413,13 +415,15 @@ def adif_write_field(stream, field, entry, comment=""):
 
 def adif_write(stream, qsos, minimal=False):
     """
-    Write an array of QSOs to an ADIF file stream.
+    Write an array of QSOs to an ADIF file stream with an ADIF compatible header.
     """
-    adif_write_field(stream, "adif_ver", "3.1.0")
+    print("Created by {} version {} on {}".format(
+        __PROGRAM__, __VERSION__, datetime.utcnow()), file=stream)
+    adif_write_field(stream, "adif_ver", __ADIF_STANDARD__)
+    adif_write_field(stream, "programid", __PROGRAM__)
+    adif_write_field(stream, "programversion", __VERSION__)
     adif_write_field(stream, "created_timestamp",
                      "{:%Y%m%d %H%M%S}".format(datetime.utcnow()))
-    adif_write_field(stream, "programid", "logmerge_pst")
-    adif_write_field(stream, "programversion", __VERSION__)
     print("<eoh>", file=stream)
     for qso in qsos:
         for field in FIELD_ORDER:
