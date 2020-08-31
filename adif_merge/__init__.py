@@ -418,7 +418,7 @@ def adif_write(stream, qsos, minimal=False):
     """
     print("Created by {} version {} on {}".format(
         __PROGRAM__, __VERSION__, datetime.utcnow()), file=stream)
-    adif_write_field(stream, "adif_ver", __ADIF_STANDARD__)
+    adif_write_field(stream, "adif_ver", __STANDARD__)
     adif_write_field(stream, "programid", __PROGRAM__)
     adif_write_field(stream, "programversion", __VERSION__)
     adif_write_field(stream, "created_timestamp",
