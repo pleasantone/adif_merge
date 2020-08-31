@@ -506,6 +506,53 @@ def read_adif_file(path) -> list:
     return adif_io.read_from_string(adif_string)
 
 
+def read_adif_files(paths):
+    """
+    Read in all ADIF records from the following files
+    """
+    qsos = []
+    malformed = []
+    for path in paths:
+        filename = os.path.basename(path)
+        raw, _adif_header = read_adif_file(path)
+        for qso in raw:
+            try:
+                qsos.append(fixup_qso(qso, filename))
+            except QSOError as err:
+                logging.warning("Ignoring QSO: %s", err.args[0])
+                malformed.append(err.args[1])
+    return qsos, malformed
+
+
+def filter_meta_fields(qsos, critical_only):
+    """
+    Remove any meta fields we created like _UNREFERENCED or _FILENAME.
+    If critical, filter out everything other than critical fields.
+    If critical, filter out gridsquare as well because of the MH4 vs MH6/8 differences.
+    """
+    if critical_only:
+        fields = [field for field in FIELD_ORDER if field not in ["GRIDSQUARE", "NAME", "COMMENT"]]
+        qsos = [{key: val for key, val in qso.items() if key in fields} for qso in qsos]
+    else:
+        qsos = [{key: val for key, val in qso.items() if key[0] != "_"} for qso in qsos]
+    return qsos
+
+
+def dump_qso_comparison(test_qsos, reference_qsos, compare_critical):
+    """
+    Compare the differences between qsos and previous run.
+    """
+    reference_qsos = filter_meta_fields(reference_qsos, compare_critical)
+    test_qsos = filter_meta_fields(test_qsos, compare_critical)
+    reference_only = [qso for qso in reference_qsos if qso not in test_qsos]
+    test_only = [qso for qso in test_qsos if qso not in reference_qsos]
+    # XXX this is just a hack for now, we should really come up with a better encoding
+    with open("compare-1.json", "w", encoding=ADIF_ENCODING) as cfd:
+        json.dump(test_only, cfd, indent=4, sort_keys=True)
+    with open("compare-2.json", "w", encoding=ADIF_ENCODING) as cfd:
+        json.dump(reference_only, cfd, indent=4, sort_keys=True)
+
+
 def main():
     """
     Load ADIF files, clean each qso individually produce output
@@ -515,13 +562,17 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--problems', '-p', type=str,
                         help="Intermediate problem output .json")
+    parser.add_argument('--compare', '-c', type=str,
+                        help="Merge ADIF files and only compare against previous run")
+    parser.add_argument('--compare-critical', '-C', action='store_true',
+                        help="When doing a comparison, only compare critical QSO fields")
     parser.add_argument('--output', '-o', type=str, default="qso_merged.adif",
                         help="Merged log output .adif")
     parser.add_argument('--minimal', '-m', action='store_true',
                         help="Only output important fields")
     parser.add_argument('--merge-window', type=int, default=MERGE_WINDOW,
                         help="Time window for merging discrepent log entries")
-    parser.add_argument('--csv', '-c', type=str,
+    parser.add_argument('--wsjtx-log', '-w', type=str,
                         help="WSJT-X compatible .log file")
     parser.add_argument('--log-level', type=str, default="info",
                         help="Log level for debugging")
@@ -536,19 +587,13 @@ def main():
         raise ValueError("Invalid log-level: {}".format(args.log_level))
     logging.basicConfig(format='%(levelname)s: %(message)s', level=numeric_level)
 
-    qsos = []
-    malformed = []
-    for path in args.input:
-        filename = os.path.basename(path)
-        raw, _adif_header = read_adif_file(path)
-        for qso in raw:
-            try:
-                qsos.append(fixup_qso(qso, filename))
-            except QSOError as err:
-                logging.warning("Ignoring QSO: %s", err.args[0])
-                malformed.append(err.args[1])
-
+    qsos, malformed = read_adif_files(args.input)
     qsos = merge_qsos(qsos, args.merge_window)
+
+    if args.compare:
+        reference_qsos, _reference_malformed = read_adif_files([args.compare])
+        dump_qso_comparison(qsos, reference_qsos, args.compare_critical)
+        return
 
     if args.problems:
         dump_problems(qsos, malformed, args.problems)
@@ -558,8 +603,8 @@ def main():
         with open(args.output, "w", encoding=ADIF_ENCODING) as adiffile:
             adif_write(adiffile, qsos, args.minimal)
 
-    if args.csv:
-        with open(args.csv, "w", encoding=ADIF_ENCODING) as csvfile:
+    if args.wsjtx_log:
+        with open(args.wsjtx_log, "w", encoding=ADIF_ENCODING) as csvfile:
             csv_write(csvfile, qsos)
 
 
