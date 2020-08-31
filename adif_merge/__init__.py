@@ -118,7 +118,6 @@ FIELD_MODES_REVERSE = {
 
 class QSOError(ValueError):
     """Malformed ADIF QSO Entry"""
-    pass
 
 
 _WSTRANS = str.maketrans('', '', string.whitespace)
