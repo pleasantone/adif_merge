@@ -39,7 +39,7 @@ from datetime import datetime, timedelta
 import adif_io
 
 __PROGRAM__ = "adif_merge_pst"
-__VERSION__ = "1.1.2"
+__VERSION__ = "1.1.3"
 __STANDARD__= "3.1.0"
 
 # merge any calls in the same band and same mode within 115 seconds
@@ -84,8 +84,8 @@ FIELD_INTEGERS = [
     # this is an enumeration but treat it as an integer
     'DXCC']
 FIELD_INTEGERS_POS = [
-    'CQZ', 'FISTS', 'FISTS_CC', 'IOTA_ISLAND_ID', 'ITUZ',
-    'MY_CQ_ZONE', 'MY_FISTS', 'MY_IOTA_ISLAND_ID', 'MY_ITU_ZONE',
+    'CQZ', 'FISTS', 'FISTS_CC', 'ITUZ',
+    'MY_CQ_ZONE', 'MY_FISTS', 'MY_ITU_ZONE',
     'TEN_TEN', 'UKMSG']
 FIELD_NUMBERS = [
     'AGE', 'A_INDEX', 'ANT_AZ', 'ANT_EL', 'DISTANCE', 'FREQ', 'FREQ_RX',
